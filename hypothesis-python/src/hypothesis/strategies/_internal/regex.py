@@ -34,24 +34,6 @@ from hypothesis import strategies as st
 from hypothesis.internal.charmap import as_general_categories, categories
 from hypothesis.internal.compat import add_note, int_to_byte
 
-CHAR_ST = st.characters(blacklist_categories=("Cs",))
-TEXT_ST = st.text(alphabet=CHAR_ST, min_size=0)
-
-
-def set_regex_char(char_st: st.SearchStrategy[str]):
-    if not isinstance(char_st, st.SearchStrategy):
-        return
-    global CHAR_ST
-    CHAR_ST = char_st
-
-
-def set_regex_text(text_st: st.SearchStrategy[str]):
-    if not isinstance(text_st, st.SearchStrategy):
-        return
-    global TEXT_ST
-    TEXT_ST = text_st
-
-
 UNICODE_CATEGORIES = set(categories())
 
 
@@ -279,14 +261,12 @@ def regex_strategy(
 
     if not parsed:
         if is_unicode:
-            # Original: return st.text(alphabet=alphabet)
-            return TEXT_ST
+            return st.text(alphabet=alphabet)
         else:
             return st.binary()
 
     if is_unicode:
-        # Original: base_padding_strategy = st.text(alphabet=alphabet)
-        base_padding_strategy = TEXT_ST
+        base_padding_strategy = st.text(alphabet=alphabet)
         empty = st.just("")
         newline = st.just("\n")
     else:
