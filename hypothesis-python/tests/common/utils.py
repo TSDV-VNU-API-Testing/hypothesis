@@ -10,6 +10,7 @@
 
 import contextlib
 import sys
+import warnings
 from io import StringIO
 from types import SimpleNamespace
 
@@ -45,6 +46,20 @@ except ModuleNotFoundError:
             raise AssertionError(
                 f"Expected to raise an exception ({expected_exception!r}) but didn't"
             ) from None
+
+
+try:
+    from pytest import mark
+except ModuleNotFoundError:
+
+    def skipif_emscripten(f):
+        return f
+
+else:
+    skipif_emscripten = mark.skipif(
+        sys.platform == "emscripten",
+        reason="threads, processes, etc. are not available in the browser",
+    )
 
 
 no_shrink = tuple(set(settings.default.phases) - {Phase.shrink, Phase.explain})
@@ -206,6 +221,15 @@ def temp_registered(type_, strat_or_factory):
         from_type.__clear_cache()
         if prev is not None:
             register_type_strategy(type_, prev)
+
+
+@contextlib.contextmanager
+def raises_warning(expected_warning, match=None):
+    """Use instead of pytest.warns to check that the raised warning is handled properly"""
+    with raises(expected_warning, match=match) as r:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", category=expected_warning)
+            yield r
 
 
 # Specifies whether we can represent subnormal floating point numbers.

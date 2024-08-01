@@ -8,7 +8,11 @@
 # v. 2.0. If a copy of the MPL was not distributed with this file, You can
 # obtain one at https://mozilla.org/MPL/2.0/.
 
+from unittest import SkipTest
+
 from hypothesis import HealthCheck, Phase, Verbosity, given, settings as Settings
+from hypothesis._settings import local_settings
+from hypothesis.control import _current_build_context
 from hypothesis.errors import Found, NoSuchExample, Unsatisfiable
 from hypothesis.internal.reflection import get_pretty_function_description
 
@@ -25,6 +29,11 @@ def minimal(definition, condition=lambda x: True, settings=None, timeout_after=1
     definition.validate()
     runtime = None
     result = None
+
+    if (
+        context := _current_build_context.value
+    ) and context.data.provider.avoid_realization:
+        raise SkipTest("`minimal()` helper not supported under symbolic execution")
 
     def wrapped_condition(x):
         nonlocal runtime
@@ -71,6 +80,13 @@ def minimal(definition, condition=lambda x: True, settings=None, timeout_after=1
 
 
 def find_any(definition, condition=lambda _: True, settings=None):
+    # If nested within an existing @given
+    if context := _current_build_context.value:
+        while True:
+            if condition(s := context.data.draw(definition)):
+                return s
+
+    # If top-level
     settings = settings or Settings.default
     return minimal(
         definition,
@@ -83,22 +99,66 @@ def find_any(definition, condition=lambda _: True, settings=None):
 
 def assert_no_examples(strategy, condition=lambda _: True):
     try:
-        result = find_any(strategy, condition)
-        raise AssertionError(f"Expected no results but found {result!r}")
+        assert_all_examples(strategy, lambda val: not condition(val))
     except (Unsatisfiable, NoSuchExample):
         pass
 
 
-def assert_all_examples(strategy, predicate):
+def assert_all_examples(strategy, predicate, settings=None):
     """Asserts that all examples of the given strategy match the predicate.
 
     :param strategy: Hypothesis strategy to check
     :param predicate: (callable) Predicate that takes example and returns bool
     """
+    if context := _current_build_context.value:
+        with local_settings(Settings(parent=settings)):
+            for _ in range(20):
+                s = context.data.draw(strategy)
+                msg = f"Found {s!r} using strategy {strategy} which does not match"
+                assert predicate(s), msg
 
-    @given(strategy)
-    def assert_examples(s):
-        msg = f"Found {s!r} using strategy {strategy} which does not match"
-        assert predicate(s), msg
+    else:
 
-    assert_examples()
+        @given(strategy)
+        @Settings(parent=settings, database=None)
+        def assert_examples(s):
+            msg = f"Found {s!r} using strategy {strategy} which does not match"
+            assert predicate(s), msg
+
+        assert_examples()
+
+
+def assert_simple_property(strategy, predicate, settings=None):
+    """Like assert_all_examples, intended as a self-documenting shortcut for simple constant
+    properties (`is`, `isinstance`, `==`, ...) that can be adequately verified in just a few
+    examples.
+
+    For more thorough checking, use assert_all_examples.
+    """
+
+    assert_all_examples(
+        strategy,
+        predicate,
+        Settings(
+            parent=settings,
+            max_examples=15,
+            suppress_health_check=list(HealthCheck),
+        ),
+    )
+
+
+def check_can_generate_examples(strategy, settings=None):
+    """Tries to generate a small number of examples from the strategy, to verify that it can
+    do so without raising.
+
+    Nothing is returned, it only checks that no error is raised.
+    """
+
+    assert_simple_property(
+        strategy,
+        lambda _: True,
+        settings=Settings(
+            parent=settings,
+            phases=(Phase.generate,),
+        ),
+    )

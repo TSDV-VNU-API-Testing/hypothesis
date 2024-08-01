@@ -10,18 +10,22 @@
 
 import dataclasses
 import functools
+import random
+import sys
 from collections import defaultdict, namedtuple
 
 import attr
 import pytest
 
-from hypothesis.errors import InvalidArgument
+from hypothesis import given
+from hypothesis.errors import InvalidArgument, Unsatisfiable
 from hypothesis.internal.conjecture.data import ConjectureData
 from hypothesis.internal.reflection import get_pretty_function_description
-from hypothesis.strategies import booleans, integers, just, none, tuples
+from hypothesis.strategies import booleans, data, integers, just, lists, none, tuples
 from hypothesis.strategies._internal.utils import to_jsonable
 
-from tests.common.debug import assert_no_examples
+from tests.common.debug import assert_simple_property, check_can_generate_examples
+from tests.common.utils import checks_deprecated_behaviour
 
 
 def test_or_errors_when_given_non_strategy():
@@ -62,11 +66,12 @@ def test_none_strategy_does_not_draw():
 
 def test_can_map():
     s = integers().map(pack=lambda t: "foo")
-    assert s.example() == "foo"
+    assert_simple_property(s, lambda v: v == "foo")
 
 
 def test_example_raises_unsatisfiable_when_too_filtered():
-    assert_no_examples(integers().filter(lambda x: False))
+    with pytest.raises(Unsatisfiable):
+        check_can_generate_examples(integers().filter(lambda x: False))
 
 
 def nameless_const(x):
@@ -88,7 +93,24 @@ def test_can_flatmap_nameless():
 
 def test_flatmap_with_invalid_expand():
     with pytest.raises(InvalidArgument):
-        just(100).flatmap(lambda n: "a").example()
+        check_can_generate_examples(just(100).flatmap(lambda n: "a"))
+
+
+_bad_random_strategy = lists(integers(), min_size=1).map(random.choice)
+
+
+@checks_deprecated_behaviour
+def test_use_of_global_random_is_deprecated_in_given():
+    check_can_generate_examples(_bad_random_strategy)
+
+
+@checks_deprecated_behaviour
+def test_use_of_global_random_is_deprecated_in_interactive_draws():
+    @given(data())
+    def inner(d):
+        d.draw(_bad_random_strategy)
+
+    inner()
 
 
 def test_jsonable():
@@ -120,3 +142,34 @@ def test_jsonable_namedtuple():
     Obj = namedtuple("Obj", ("x"))
     obj = Obj(10)
     assert to_jsonable(obj) == {"x": 10}
+
+
+def test_jsonable_small_ints_are_ints():
+    n = 2**62
+    assert isinstance(to_jsonable(n), int)
+    assert to_jsonable(n) == n
+
+
+def test_jsonable_large_ints_are_floats():
+    n = 2**63
+    assert isinstance(to_jsonable(n), float)
+    assert to_jsonable(n) == float(n)
+
+
+def test_jsonable_very_large_ints():
+    # previously caused OverflowError when casting to float.
+    n = 2**1024
+    assert to_jsonable(n) == sys.float_info.max
+
+
+@dataclasses.dataclass()
+class HasCustomJsonFormat:
+    x: str
+
+    def to_json(self):
+        return "surprise!"
+
+
+def test_jsonable_override():
+    obj = HasCustomJsonFormat("expected")
+    assert to_jsonable(obj) == "surprise!"

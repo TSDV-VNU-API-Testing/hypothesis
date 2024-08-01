@@ -8,12 +8,13 @@
 # v. 2.0. If a copy of the MPL was not distributed with this file, You can
 # obtain one at https://mozilla.org/MPL/2.0/.
 
+import gc
 import time
 
 import pytest
 
 from hypothesis import given, settings, strategies as st
-from hypothesis.errors import DeadlineExceeded, Flaky, InvalidArgument
+from hypothesis.errors import DeadlineExceeded, FlakyFailure, InvalidArgument
 
 from tests.common.utils import assert_falsifying_output, fails_with
 
@@ -55,7 +56,7 @@ def test_raises_flaky_if_a_test_becomes_fast_on_rerun():
             once[0] = False
             time.sleep(1)
 
-    with pytest.raises(Flaky):
+    with pytest.raises(FlakyFailure):
         test_flaky_slow()
 
 
@@ -109,7 +110,7 @@ def test_gives_a_deadline_specific_flaky_error_message():
             once[0] = False
             time.sleep(0.2)
 
-    with pytest.raises(Flaky) as err:
+    with pytest.raises(FlakyFailure) as err:
         slow_once()
     assert "Unreliable test timing" in "\n".join(err.value.__notes__)
     assert "took 2" in "\n".join(err.value.__notes__)
@@ -134,3 +135,23 @@ def test_should_only_fail_a_deadline_if_the_test_is_slow(slow_strategy, slow_tes
             test()
     else:
         test()
+
+
+@pytest.mark.skipif(not hasattr(gc, "callbacks"), reason="CPython specific gc delay")
+def test_should_not_fail_deadline_due_to_gc():
+    @settings(max_examples=1, deadline=50)
+    @given(st.integers())
+    def test(i):
+        before = time.perf_counter()
+        gc.collect()
+        assert time.perf_counter() - before >= 0.1  # verify that we're slow
+
+    def delay(phase, _info):
+        if phase == "start":
+            time.sleep(0.1)
+
+    try:
+        gc.callbacks.append(delay)
+        test()
+    finally:
+        gc.callbacks.remove(delay)

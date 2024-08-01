@@ -145,15 +145,18 @@ def test_triviality():
     d = ConjectureData.for_buffer([1, 0, 1])
 
     d.start_example(label=1)
-    d.draw_boolean()
-    d.draw_boolean()
+    d.draw(st.booleans())
+    d.draw(st.booleans())
     d.stop_example()
 
+    d.start_example(label=2)
     d.draw_bytes(1, forced=bytes([2]))
+    d.stop_example()
+
     d.freeze()
 
     def eg(u, v):
-        return next(ex for ex in d.examples if ex.start == u and ex.end == v)
+        return next(ex for ex in d.examples if ex.ir_start == u and ex.ir_end == v)
 
     assert not eg(0, 2).trivial
     assert not eg(0, 1).trivial
@@ -163,20 +166,30 @@ def test_triviality():
 
 def test_example_depth_marking():
     d = ConjectureData.for_buffer(bytes(24))
-
     # These draw sizes are chosen so that each example has a unique length.
-    d.draw_bytes(2)
+    d.draw(st.binary(min_size=2, max_size=2))
     d.start_example("inner")
-    d.draw_bytes(3)
-    d.draw_bytes(6)
+    d.draw(st.binary(min_size=3, max_size=3))
+    d.draw(st.binary(min_size=6, max_size=6))
     d.stop_example()
-    d.draw_bytes(12)
+    d.draw(st.binary(min_size=12, max_size=12))
     d.freeze()
 
-    assert len(d.examples) == 6
+    assert len(d.examples) == 10
 
     depths = {(ex.length, ex.depth) for ex in d.examples}
-    assert depths == {(2, 1), (3, 2), (6, 2), (9, 1), (12, 1), (23, 0)}
+    assert depths == {
+        (2, 1),
+        (2, 2),
+        (3, 2),
+        (3, 3),
+        (6, 2),
+        (6, 3),
+        (9, 1),
+        (12, 1),
+        (12, 2),
+        (23, 0),
+    }
 
 
 def test_has_examples_even_when_empty():
@@ -198,16 +211,6 @@ def test_has_cached_examples_even_when_overrun():
     assert d.status == Status.OVERRUN
     assert any(ex.label == 3 and ex.length == 1 for ex in d.examples)
     assert d.examples is d.examples
-
-
-def test_can_write_empty_bytes():
-    d = ConjectureData.for_buffer([1, 1, 1])
-    d.draw_boolean()
-    d.draw_bytes(0)
-    d.draw_boolean()
-    d.draw_bytes(0, forced=b"")
-    d.draw_boolean()
-    assert d.buffer == bytes([1, 1, 1])
 
 
 def test_blocks_preserve_identity():
@@ -252,8 +255,11 @@ def test_can_observe_draws():
         def __init__(self):
             self.log = []
 
-        def draw_bits(self, n_bits: int, *, forced: bool, value: int) -> None:
-            self.log.append(("draw", n_bits, forced, value))
+        def draw_boolean(self, value: bool, *, was_forced: bool, kwargs: dict):
+            self.log.append(("draw_boolean", value, was_forced))
+
+        def draw_integer(self, value: int, *, was_forced: bool, kwargs: dict):
+            self.log.append(("draw_integer", value, was_forced))
 
         def conclude_test(self, *args):
             assert x.frozen
@@ -269,9 +275,9 @@ def test_can_observe_draws():
         x.conclude_test(Status.INTERESTING, interesting_origin="neat")
 
     assert observer.log == [
-        ("draw", 1, False, 1),
-        ("draw", 7, True, 10),
-        ("draw", 8, False, 3),
+        ("draw_boolean", True, False),
+        ("draw_integer", 10, True),
+        ("draw_integer", 3, False),
         ("concluded", Status.INTERESTING, "neat"),
     ]
 
@@ -339,8 +345,8 @@ def test_examples_show_up_as_discarded():
 
 def test_examples_support_negative_indexing():
     d = ConjectureData.for_buffer(bytes(2))
-    d.draw_boolean()
-    d.draw_boolean()
+    d.draw(st.booleans())
+    d.draw(st.booleans())
     d.freeze()
     assert d.examples[-1].length == 1
 
@@ -355,7 +361,7 @@ def test_can_override_label():
 def test_will_mark_too_deep_examples_as_invalid():
     d = ConjectureData.for_buffer(bytes(0))
 
-    s = st.none()
+    s = st.integers()
     for _ in range(MAX_DEPTH + 1):
         s = s.map(lambda x: None)
 
@@ -444,13 +450,13 @@ def test_child_indices():
     d = ConjectureData.for_buffer(bytes(4))
 
     d.start_example(0)  # examples[1]
-    d.start_example(0)  # examples[2]
-    d.draw_boolean()  # examples[3] + draw_bits (examples[4])
-    d.draw_boolean()  # examples[5] + draw_bits (examples[6])
+    d.start_example(1)  # examples[2]
+    d.draw(st.booleans())  # examples[3] (lazystrategy) + examples[4] (st.booleans)
+    d.draw(st.booleans())  # examples[4] (lazystrategy) + examples[5] (st.booleans)
     d.stop_example()
     d.stop_example()
-    d.draw_boolean()  # examples[7] + draw_bits (examples[8])
-    d.draw_boolean()  # examples[9] + draw_bits (examples[10])
+    d.draw(st.booleans())  # examples[7] (lazystrategy) + examples[8] (st.booleans)
+    d.draw(st.booleans())  # examples[9] (lazystrategy) + examples[10] (st.booleans)
     d.freeze()
 
     assert list(d.examples.children[0]) == [1, 7, 9]

@@ -18,6 +18,9 @@ from hypothesis import given, strategies as st
 from hypothesis.errors import HypothesisWarning, ResolutionFailed
 from hypothesis.strategies._internal.lazy import unwrap_strategies
 from hypothesis.strategies._internal.strategies import FilteredStrategy
+from hypothesis.strategies._internal.types import _get_constraints
+
+from tests.common.debug import check_can_generate_examples
 
 try:
     from typing import Annotated  # new in Python 3.9
@@ -35,8 +38,11 @@ def test_strategy_priority_over_constraints():
 
 
 def test_invalid_annotated_type():
-    with pytest.raises(ResolutionFailed):
-        st.from_type(Annotated[None, "dummy", Annotated[int, "dummy"]]).example()
+    msg = re.escape("Did you mean `Annotated[str | int, 'dummy']`?")
+    with pytest.raises(ResolutionFailed, match=f".*{msg}$"):
+        check_can_generate_examples(
+            st.from_type(Annotated[str, "dummy", Annotated[int, "dummy"]])
+        )
 
 
 @pytest.mark.parametrize(
@@ -57,7 +63,7 @@ def test_unsupported_constraints(unsupported_constraints, message):
     else:
         t = Annotated.__class_getitem__((int, *unsupported_constraints))
     with pytest.warns(HypothesisWarning, match=re.escape(message)):
-        st.from_type(t).example()
+        check_can_generate_examples(st.from_type(t))
 
 
 @pytest.mark.parametrize(
@@ -112,3 +118,22 @@ def test_collection_size_from_slice(data):
     t = Annotated[MyCollection, "we just ignore this", slice(1, 10)]
     value = data.draw(st.from_type(t))
     assert 1 <= len(value) <= 10
+
+
+class GroupedStuff:
+    __is_annotated_types_grouped_metadata__ = True
+
+    def __init__(self, *args) -> None:
+        self._args = args
+
+    def __iter__(self):
+        return iter(self._args)
+
+    def __repr__(self) -> str:
+        return f"GroupedStuff({', '.join(map(repr, self._args))})"
+
+
+def test_flattens_grouped_metadata():
+    grp = GroupedStuff(GroupedStuff(GroupedStuff(at.Len(min_length=1, max_length=5))))
+    constraints = list(_get_constraints(grp))
+    assert constraints == [at.MinLen(1), at.MaxLen(5)]

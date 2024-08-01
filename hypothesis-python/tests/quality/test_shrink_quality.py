@@ -107,6 +107,10 @@ def test_minimize_sets_of_sets():
             assert any(s != t and t.issubset(s) for t in set_of_sets)
 
 
+def test_minimize_sets_sampled_from():
+    assert minimal(st.sets(st.sampled_from(range(10)), min_size=3)) == {0, 1, 2}
+
+
 def test_can_simplify_flatmap_with_bounded_left_hand_size():
     assert (
         minimal(booleans().flatmap(lambda x: lists(just(x))), lambda x: len(x) >= 10)
@@ -392,3 +396,9 @@ def test_calculator_benchmark():
     x = minimal(expression, is_failing)
 
     assert x == ("/", 0, ("+", 0, 0))
+
+
+def test_one_of_slip():
+    # TODO_BETTER_SHRINK: minimal here is 101, but we almost always fail to slip from
+    # 0 when shrinking.
+    assert minimal(st.integers(101, 200) | st.integers(0, 100)) in {101, 0}

@@ -12,10 +12,10 @@ import datetime as dt
 
 import pytest
 
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis.strategies import dates, datetimes, timedeltas, times
 
-from tests.common.debug import find_any, minimal
+from tests.common.debug import assert_simple_property, find_any, minimal
 
 
 def test_can_find_positive_delta():
@@ -49,9 +49,10 @@ def test_max_value_is_respected():
     assert minimal(timedeltas(max_value=dt.timedelta(days=-10))).days == -10
 
 
+@settings(suppress_health_check=list(HealthCheck))
 @given(timedeltas())
 def test_single_timedelta(val):
-    assert find_any(timedeltas(val, val)) is val
+    assert_simple_property(timedeltas(val, val), lambda v: v is val)
 
 
 def test_simplifies_towards_millenium():

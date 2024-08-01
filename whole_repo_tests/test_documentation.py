@@ -8,20 +8,8 @@
 # v. 2.0. If a copy of the MPL was not distributed with this file, You can
 # obtain one at https://mozilla.org/MPL/2.0/.
 
-import asyncio
-from unittest import TestCase
-
-from hypothesis import assume, given, strategies as st
+from hypothesistooling.__main__ import documentation
 
 
-class TestAsyncioRun(TestCase):
-    timeout = 5
-
-    def execute_example(self, f):
-        asyncio.run(f())
-
-    @given(st.text())
-    async def test_foo(self, x):
-        assume(x)
-        await asyncio.sleep(0.001)
-        assert x
+def test_documentation():
+    documentation()
